@@ -41,7 +41,7 @@ public class TestClient {
     private static EduIdConnector conn;
 
     private static String DOMAIN = "";
-    private static final String ID = "859379";
+    private static String ID = "";
 
     ObjectClass affiliationObjectClass = new ObjectClass(EduIdConnector.AFFILIATION_OBJECT_CLASS);
 
@@ -67,6 +67,7 @@ public class TestClient {
         conn.init(conf);
 
         DOMAIN = properties.getProperty("domain");
+        ID = properties.getProperty("id");
     }
 
     @Test
