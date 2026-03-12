@@ -27,7 +27,7 @@
     </parent>
 
     <artifactId>connector-eduid</artifactId>
-    <version>1.0.0.2-empa</version>
+    <version>1.0.0.3-empa</version>
     <packaging>jar</packaging>
 
 

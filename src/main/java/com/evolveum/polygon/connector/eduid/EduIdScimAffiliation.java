@@ -124,8 +124,12 @@ public record EduIdScimAffiliation(
         @JsonProperty("swissLibraryPersonResidence")
         List<String> swissLibraryPersonResidence,
 
+
         @JsonProperty("eduPersonAssurance")
         List<String> eduPersonAssurance,
+
+        @JsonProperty("swissEduIDAssuranceLevel")
+        List<String> swissEduIDAssuranceLevel,
 
         @JsonProperty("eduPersonEntitlement")
         List<String> eduPersonEntitlement,
@@ -171,7 +175,15 @@ public record EduIdScimAffiliation(
         List<Integer> swissEduPersonStudyBranch2,
 
         @JsonProperty("swissEduPersonStudyBranch3")
-        List<Integer> swissEduPersonStudyBranch3
+        List<Integer> swissEduPersonStudyBranch3,
+
+        @JsonProperty("eduPersonOrcid")
+        List<String> eduPersonOrcid,
+
+        @JsonProperty("userPrincipalName")
+        String userPrincipalName
+
+
 
 ) {
     private static final String SCHEMAS_VALUE = "urn:mace:switch.ch:eduid:scim:1.0:affiliation";
