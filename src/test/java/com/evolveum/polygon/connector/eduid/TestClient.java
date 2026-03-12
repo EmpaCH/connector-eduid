@@ -15,14 +15,11 @@
  */
 package com.evolveum.polygon.connector.eduid;
 
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.util.EntityUtils;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
+import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
-import org.json.JSONArray;
-import org.json.JSONObject;
+import org.testng.Assert;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
@@ -78,104 +75,53 @@ public class TestClient {
     @Test
     public void testSchema() {
         Schema schema = conn.schema();
-        LOG.info("schema: " + schema);
+        //LOG.info("schema: " + schema);
         // TODO: verify manually
     }
 
     @Test
-    public void testGet() throws IOException {
-        HttpGet request = new HttpGet(conf.getServiceAddress() + EduIdConnector.AFFILIATIONS + "/" + ID+DOMAIN);
-        CloseableHttpResponse response = conn.execute(request);
-        conn.processResponseErrors(response);
-        LOG.info("resp: {0}", response);
-        String result = EntityUtils.toString(response.getEntity());
-        LOG.info("content: {0}", result);
+    public void testGetAll() throws IOException {
+        conn.executeQuery(affiliationObjectClass, null, connectorObject -> {
+            System.out.println("result:" + connectorObject.toString());
+            return true;
+        }, null);
+    }
+
+    @Test(expectedExceptions = {org.identityconnectors.framework.common.exceptions.UnknownUidException.class})
+    public void testGetNonExisting() throws IOException {
+        EduIdFilter filter = new EduIdFilter();
+        filter.byUid = "idThatDoesNotExist" + DOMAIN;
+        conn.executeQuery(affiliationObjectClass, filter, connectorObject -> {
+            System.out.println("result:" + connectorObject.toString());
+            return true;
+        }, null);
         // TODO: verify manually over GUI
     }
 
     @Test
-    public void testCreateUser() {
-
-        //create
-        Set<Attribute> attributes = new HashSet<Attribute>();
-        String randName = ID; //"1111";// + (new Random()).nextInt();
-        String id = randName+DOMAIN;
-
-//        attributes.add(AttributeBuilder.build(Name.NAME, randName));
-        String[] schemas = {EduIdConnector.SCHEMAS_VALUE};
-        attributes.add(AttributeBuilder.build(EduIdConnector.SCHEMAS, schemas));
-        attributes.add(AttributeBuilder.build(EduIdConnector.ID, id));
-        attributes.add(AttributeBuilder.build(EduIdConnector.EXTERNAL_ID, id));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_PERSON_UNIQUE_ID, id));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_ID, "00007a31-2f1f-4f3f-9a6a-0064363eb6c4"));
-        String[] emails = {"bsmith@example.com"};
-        attributes.add(AttributeBuilder.build(EduIdConnector.EMAIL, emails));
-        attributes.add(AttributeBuilder.build(EduIdConnector.GIVEN_NAME, "Barbara"));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SURNAME, "Smith"));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_ID_AFFILIATION_STATUS, "current"));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_ID_AFFILIATION_PERIOD_BEGIN, "2018-01-01"));
-        String[] affiliations = {"student"};
-        attributes.add(AttributeBuilder.build(EduIdConnector.EDU_PERSON_AFFILIATION, affiliations));
-
-        Uid userUid = conn.create(affiliationObjectClass, attributes, null);
-        LOG.ok("New user Uid is: {0}, sent: {1}", userUid.getUidValue(), id);
-        // TODO: verify manually over GUI
-    }
-
-    @Test
-    public void testDeleteUser() {
-        Uid uid = new Uid(ID+DOMAIN);
-        conn.delete(affiliationObjectClass, uid, null);
-        // TODO: verify manually over GUI
-    }
-    @Test
-    public void testUpdateUser() {
-
-        //create
-        Set<Attribute> attributes = new HashSet<Attribute>();
-        String randName = ID; //"1111";// + (new Random()).nextInt();
-        String id = randName+DOMAIN;
-
-//        attributes.add(AttributeBuilder.build(Name.NAME, randName));
-        String[] schemas = {EduIdConnector.SCHEMAS_VALUE};
-        attributes.add(AttributeBuilder.build(EduIdConnector.SCHEMAS, schemas));
-        attributes.add(AttributeBuilder.build(EduIdConnector.ID, id));
-        attributes.add(AttributeBuilder.build(EduIdConnector.EXTERNAL_ID, id));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_PERSON_UNIQUE_ID, id));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_ID, "00007a31-2f1f-4f3f-9a6a-0064363eb6c4"));
-        String[] emails = {"bsmithUpdate@example.com", "bsmithNew@example.com"};
-        attributes.add(AttributeBuilder.build(EduIdConnector.EMAIL, emails));
-        attributes.add(AttributeBuilder.build(EduIdConnector.GIVEN_NAME, "BarbaraUpdate"));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SURNAME, "SmithUpdate"));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_ID_AFFILIATION_STATUS, "suspended"));
-        attributes.add(AttributeBuilder.build(EduIdConnector.SWISS_EDU_ID_AFFILIATION_PERIOD_BEGIN, "2018-03-03"));
-        String[] affiliations = {"student", "employee"};
-        attributes.add(AttributeBuilder.build(EduIdConnector.EDU_PERSON_AFFILIATION, affiliations));
-
-        Uid uid = new Uid(id);
-        Uid userUid = conn.update(affiliationObjectClass, uid, attributes, null);
-        LOG.ok("User {0} updated", userUid.getUidValue());
-        // TODO: verify manually over GUI
-    }
-
-
-    @Test
-    public void findByUid() {
-        ResultsHandler rh = new ResultsHandler() {
-            @Override
-            public boolean handle(ConnectorObject connectorObject) {
-                LOG.ok("result {0}", connectorObject);
+    public void testGetExisting() throws IOException {
+        EduIdFilter filter = new EduIdFilter();
+        filter.byUid = ID + DOMAIN;
+        List<ConnectorObject> results = new ArrayList<>();
+        try {
+            conn.executeQuery(affiliationObjectClass, filter, connectorObject -> {
+                results.add(connectorObject);
                 return true;
-            }
-        };
-
-        // searchByUId
-        EduIdFilter searchByUid = new EduIdFilter();
-        searchByUid.byUid = "2470"+DOMAIN;
-        LOG.ok("start finding: "+searchByUid.byUid);
-        conn.executeQuery(affiliationObjectClass, searchByUid, rh, null);
-        LOG.ok("end finding");
-        // TODO: verify manually over GUI
+            }, null);
+            assert results.size() == 1 : "Expected exactly one result, but got " + results.size();
+        } catch (UnknownUidException e) {
+            Assert.fail("Expected to find an existing user with UID: " + filter.byUid);
+        }
     }
 
+    @Test
+    public void testUpdateExisting() throws IOException {
+        // Update the existing user with new attributes
+        Set<Attribute> attributes = new HashSet<Attribute>();
+        String id = ID + DOMAIN;
+        String[] emails = {"test@empa.ch"};
+        attributes.add(AttributeBuilder.build("email", emails));
+        conn.update(affiliationObjectClass, new Uid(id), attributes, null);
+    }
 }
+

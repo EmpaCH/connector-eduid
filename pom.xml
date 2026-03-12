@@ -27,7 +27,7 @@
     </parent>
 
     <artifactId>connector-eduid</artifactId>
-    <version>1.0.0.1-empa</version>
+    <version>1.0.0.2-empa</version>
     <packaging>jar</packaging>
 
 
@@ -36,6 +36,8 @@
     <properties>
         <connectorPackage>com.evolveum.polygon.connector.eduid</connectorPackage>
         <connectorClass>EduIdConnector</connectorClass>
+        <jackson.version>3.0.0</jackson.version>
+
     </properties>
 
     <repositories>
@@ -104,6 +106,11 @@
             <groupId>commons-lang</groupId>
             <artifactId>commons-lang</artifactId>
             <version>2.6</version>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
         </dependency>
 
     </dependencies>
