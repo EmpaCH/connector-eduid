@@ -181,7 +181,11 @@ public record EduIdScimAffiliation(
         List<String> eduPersonOrcid,
 
         @JsonProperty("userPrincipalName")
-        String userPrincipalName
+        String userPrincipalName,
+
+        @JsonProperty("swissEduIDAffiliationSecurityPolicy")
+        @Flatten
+        SwissEduIDAffiliationSecurityPolicy swissEduIDAffiliationSecurityPolicy
 
 
 
@@ -228,24 +232,40 @@ public record EduIdScimAffiliation(
                 .toList();
     }
 
-    /**
-     * Converts this record to a ConnId object.
-     */
     public ConnectorObject toConnectorObject() {
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
-        ObjectClass objectClass = new ObjectClass(AFFILIATION_OBJECT_CLASS);
-        builder.setObjectClass(objectClass);
-        String localUid = swissEduPersonUniqueID;
-        builder.setUid(new Uid(localUid));
-        builder.setName(localUid);
-        for (RecordComponent rc : COMPONENTS) {
+        builder.setObjectClass(new ObjectClass(AFFILIATION_OBJECT_CLASS));
+        builder.setUid(new Uid(swissEduPersonUniqueID));
+        builder.setName(swissEduPersonUniqueID);
+
+        addAttributes(builder, COMPONENTS, this, "");
+
+        return builder.build();
+    }
+
+    private static void addAttributes(ConnectorObjectBuilder builder,
+                                      RecordComponent[] components,
+                                      Record instance,
+                                      String parentPath) {
+        for (RecordComponent rc : components) {
+            if (rc.getAccessor().isAnnotationPresent(Flatten.class)) {
+                JsonProperty jp = rc.getAccessor().getAnnotation(JsonProperty.class);
+                String nestedPath = jp != null
+                        ? (parentPath.isEmpty() ? jp.value() : parentPath + "." + jp.value())
+                        : parentPath;
+                Record nested = (Record) currentValue(rc, instance);
+                if (nested == null) continue;
+                addAttributes(builder, nested.getClass().getRecordComponents(), nested, nestedPath);
+                continue;
+            }
+
             JsonProperty jp = rc.getAccessor().getAnnotation(JsonProperty.class);
             if (jp == null || rc.getName().equals("schemas")) continue;
 
-            Object value = currentValue(rc, this);
+            Object value = currentValue(rc, instance);
             if (value == null) continue;
 
-            String fieldName = jp.value();
+            String fieldName = parentPath.isEmpty() ? jp.value() : parentPath + "." + jp.value();
 
             if (value instanceof List<?> list) {
                 if (list.isEmpty()) continue;
@@ -254,8 +274,6 @@ public record EduIdScimAffiliation(
                 builder.addAttribute(AttributeBuilder.build(fieldName, value));
             }
         }
-
-        return builder.build();
     }
     // -------------------------------------------------------------------------
     // Core construction — drives both from() and merge()
@@ -297,6 +315,14 @@ public record EduIdScimAffiliation(
             }
 
             String fieldName = jp.value();
+
+            // @Flatten — recurse into the nested record with prefixed attribute names
+            if (rc.getAccessor().isAnnotationPresent(Flatten.class)) {
+                Object existingNested = existing != null ? currentValue(rc, existing) : null;
+                values[i] = constructFlattenedRecord(rc.getType(), attributes, fieldName, existingNested);
+                continue;
+            }
+
             boolean isList = List.class.isAssignableFrom(rc.getType());
             Object existingValue = existing != null ? currentValue(rc, existing) : null;
 
@@ -324,6 +350,48 @@ public record EduIdScimAffiliation(
     }
 
     /**
+     * Builds an instance of a nested @Flatten record from flat attributes prefixed by parentPath.
+     * Components marked @Flatten are handled recursively. Returns null if no values are present.
+     */
+    private static Object constructFlattenedRecord(Class<?> recordType, Set<Attribute> attributes,
+                                                    String parentPath, Object existing) {
+        RecordComponent[] components = recordType.getRecordComponents();
+        Object[] values = new Object[components.length];
+        boolean anyValue = false;
+
+        for (int i = 0; i < components.length; i++) {
+            RecordComponent rc = components[i];
+            JsonProperty jp = rc.getAccessor().getAnnotation(JsonProperty.class);
+            if (jp == null) {
+                values[i] = existing != null ? currentValue(rc, (Record) existing) : null;
+                if (values[i] != null) anyValue = true;
+                continue;
+            }
+            if (rc.getAccessor().isAnnotationPresent(Flatten.class)) {
+                String nestedPath = parentPath + "." + jp.value();
+                Object existingNested = existing != null ? currentValue(rc, (Record) existing) : null;
+                values[i] = constructFlattenedRecord(rc.getType(), attributes, nestedPath, existingNested);
+                if (values[i] != null) anyValue = true;
+                continue;
+            }
+            String attributeName = parentPath + "." + jp.value();
+            boolean isList = List.class.isAssignableFrom(rc.getType());
+            Object existingValue = existing != null ? currentValue(rc, (Record) existing) : null;
+            Object incoming = isList ? resolveList(rc, attributes, attributeName) : optional(attributes, attributeName);
+            values[i] = incoming != null ? incoming : existingValue;
+            if (values[i] != null) anyValue = true;
+        }
+
+        if (!anyValue) return null;
+
+        try {
+            return recordType.getDeclaredConstructors()[0].newInstance(values);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Failed to construct " + recordType.getSimpleName(), e);
+        }
+    }
+
+    /**
      * Resolves a List-typed field from attributes, dispatching on element type.
      * Integer lists use optionalIntMulti; all others use optionalMulti (String).
      */
@@ -338,7 +406,7 @@ public record EduIdScimAffiliation(
     /**
      * Reads the current value of a record component from an existing instance via its accessor.
      */
-    private static Object currentValue(RecordComponent rc, EduIdScimAffiliation instance) {
+    private static Object currentValue(RecordComponent rc, Record instance) {
         try {
             return rc.getAccessor().invoke(instance);
         } catch (ReflectiveOperationException e) {

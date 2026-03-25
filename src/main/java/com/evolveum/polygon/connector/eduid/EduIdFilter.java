@@ -18,13 +18,4 @@ package com.evolveum.polygon.connector.eduid;
 /**
  * Created by oscar on 25. 3. 2019.
  */
-public class EduIdFilter {
-    public String byUid;
-
-    @Override
-    public String toString() {
-        return "EduIdFilter{" +
-                ", byUid=" + byUid +
-                '}';
-    }
-}
+public record EduIdFilter(String byUid) {}

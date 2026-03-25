@@ -38,13 +38,11 @@ public class EduIdFilterTranslator extends AbstractFilterTranslator<EduIdFilter>
 
         Attribute attr = filter.getAttribute();
         LOG.ok("attr.getName:  {0}, attr.getValue: {1}", attr.getName(), attr.getValue());
-        if (Uid.NAME.equals(attr.getName()) || Name.NAME.equals(attr.getName())) {
-            if (attr.getValue() != null && attr.getValue().get(0) != null) {
-                EduIdFilter eduIdFilter = new EduIdFilter();
-                eduIdFilter.byUid = String.valueOf(attr.getValue().get(0));
-                LOG.ok("EduIdFilter: {0}", eduIdFilter);
-                return eduIdFilter;
-            }
+        if ((Uid.NAME.equals(attr.getName()) || Name.NAME.equals(attr.getName()))
+                && attr.getValue() != null && attr.getValue().get(0) != null) {
+            EduIdFilter eduIdFilter = new EduIdFilter(String.valueOf(attr.getValue().get(0)));
+            LOG.ok("EduIdFilter: {0}", eduIdFilter);
+            return eduIdFilter;
         }
         return null;            // not supported
     }

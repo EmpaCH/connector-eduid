@@ -17,8 +17,6 @@ package com.evolveum.polygon.connector.eduid;
 
 import com.evolveum.polygon.rest.AbstractRestConnector;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.commons.codec.binary.Base64;
-import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.*;
 import org.apache.http.entity.ByteArrayEntity;
 import org.apache.http.util.EntityUtils;
@@ -34,7 +32,6 @@ import org.identityconnectors.framework.spi.Configuration;
 import org.identityconnectors.framework.spi.ConnectorClass;
 import org.identityconnectors.framework.spi.PoolableConnector;
 import org.identityconnectors.framework.spi.operations.*;
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import tools.jackson.databind.JavaType;
@@ -42,6 +39,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.RecordComponent;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -93,8 +91,7 @@ public class EduIdConnector extends AbstractRestConnector<EduIdConfiguration> im
     public void test() {
         LOG.ok("test - reading ServiceProviderConfig");
         try {
-            HttpGet request = new HttpGet(scimUrl(SERVICE_PROVIDER_CONFIG));
-            JSONObject response = callRequest(request, true);
+            Object response = get(scimUrl(SERVICE_PROVIDER_CONFIG), Object.class);
             LOG.ok("test - returning: {0}", response);
         } catch (IOException e) {
             throw new ConnectorIOException("Error when testing connection: " + e.getMessage(), e);
@@ -123,32 +120,47 @@ public class EduIdConnector extends AbstractRestConnector<EduIdConfiguration> im
         ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
         objClassBuilder.setType(AFFILIATION_OBJECT_CLASS);
 
+        collectAttributeInfos(objClassBuilder, EduIdScimAffiliation.class.getRecordComponents(), "");
 
-        Collection<AttributeInfo> attributeInfoBuilders = Arrays.stream((EduIdScimAffiliation.class.getRecordComponents()))
-                .filter(rc -> rc.getAccessor().getAnnotation(JsonProperty.class) != null)
-                .map(rc -> {
-                    LOG.info("processing record component: {0}", rc.getName());
-                    JsonProperty jp = rc.getAccessor().getAnnotation(JsonProperty.class);
-
-                    boolean required = jp.required();
-                    boolean readOnly = jp.access() == JsonProperty.Access.READ_ONLY;
-                    boolean multiValued = List.class.isAssignableFrom(rc.getType());
-                    Class<?> elementType = multiValued
-                            ? (Class<?>) ((ParameterizedType) rc.getGenericType()).getActualTypeArguments()[0]
-                            : rc.getType();
-
-
-                    AttributeInfoBuilder attr = new AttributeInfoBuilder(jp.value(), elementType);
-                    attr.setRequired(required);
-                    attr.setMultiValued(multiValued);
-                    return attr.build();
-
-                }).toList();
-        objClassBuilder.addAllAttributeInfo(attributeInfoBuilders);
         LOG.info("built ObjectClassInfo for {0}: {1}", AFFILIATION_OBJECT_CLASS, objClassBuilder.build());
         schemaBuilder.defineObjectClass(objClassBuilder.build());
     }
 
+    private void collectAttributeInfos(ObjectClassInfoBuilder objClassBuilder, RecordComponent[] components, String parentPath) {
+        LOG.info("Building attribute infos for record components: {0}", Arrays.toString(components));
+        for (RecordComponent rc : components) {
+            JsonProperty jp = rc.getAccessor().getAnnotation(JsonProperty.class);
+            if (jp == null || rc.getName().equals("schemas")) continue;
+
+            if (rc.getAccessor().isAnnotationPresent(Flatten.class)) {
+                String nestedPath = parentPath.isEmpty()
+                        ? jp.value()
+                        : parentPath + "." + jp.value();
+                collectAttributeInfos(objClassBuilder, rc.getType().getRecordComponents(), nestedPath);
+                continue;
+            }
+
+            LOG.info("processing record component: {0}", rc.getName());
+
+            String attributeName = parentPath.isEmpty()
+                    ? jp.value()
+                    : parentPath + "." + jp.value();
+
+            boolean required     = jp.required();
+            boolean readOnly     = jp.access() == JsonProperty.Access.READ_ONLY;
+            boolean multiValued  = List.class.isAssignableFrom(rc.getType());
+            Class<?> elementType = multiValued
+                    ? (Class<?>) ((ParameterizedType) rc.getGenericType()).getActualTypeArguments()[0]
+                    : rc.getType();
+
+            AttributeInfoBuilder attr = new AttributeInfoBuilder(attributeName, elementType);
+            attr.setRequired(required);
+            attr.setMultiValued(multiValued);
+            attr.setCreateable(!readOnly);
+            attr.setUpdateable(!readOnly);
+            objClassBuilder.addAttributeInfo(attr.build());
+        }
+    }
 
     @Override
     public Uid create(ObjectClass objectClass, Set<Attribute> attributes, OperationOptions operationOptions) {
@@ -161,27 +173,6 @@ public class EduIdConnector extends AbstractRestConnector<EduIdConfiguration> im
     }
 
 
-
-    protected JSONObject callRequest(HttpRequestBase request, boolean parseResult) throws IOException {
-        LOG.ok("request URI: {0}", request.getURI());
-        request.setHeader("Content-Type", CONTENT_TYPE);
-
-        authHeader(request);
-
-        CloseableHttpResponse response = null;
-        response = execute(request);
-        LOG.ok("response: {0}", response);
-        processEduIdResponseErrors(response, request);
-
-        if (!parseResult) {
-            closeResponse(response);
-            return null;
-        }
-        String result = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-        LOG.ok("response body: {0}", result);
-        closeResponse(response);
-        return new JSONObject(result);
-    }
 
     private void authHeader(HttpRequestBase request) {
         // to prevent several calls http://stackoverflow.com/questions/20914311/httpclientbuilder-basic-auth
@@ -197,8 +188,9 @@ public class EduIdConnector extends AbstractRestConnector<EduIdConfiguration> im
         } else {
             return;
         }
-        byte[] credentials = Base64.encodeBase64((getConfiguration().getUsername() + ":" + sb.toString()).getBytes(StandardCharsets.UTF_8));
-        request.setHeader("Authorization", "Basic " + new String(credentials, StandardCharsets.UTF_8));
+        String credentials = java.util.Base64.getEncoder().encodeToString(
+                (getConfiguration().getUsername() + ":" + sb).getBytes(StandardCharsets.UTF_8));
+        request.setHeader("Authorization", "Basic " + credentials);
     }
 
 
@@ -339,6 +331,7 @@ public class EduIdConnector extends AbstractRestConnector<EduIdConfiguration> im
         HttpPost request = new HttpPost(url);
         request.setEntity(new ByteArrayEntity(mapper.writeValueAsBytes(body)));
         CloseableHttpResponse response = executeScimRequest(request);
+        if (response == null) throw new ConnectorIOException("POST " + url + " succeeded but returned no response body");
         String result = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
         closeResponse(response);
         return mapper.readValue(result, responseType);
@@ -348,6 +341,7 @@ public class EduIdConnector extends AbstractRestConnector<EduIdConfiguration> im
         HttpPut request = new HttpPut(url);
         request.setEntity(new ByteArrayEntity(mapper.writeValueAsBytes(body)));
         CloseableHttpResponse response = executeScimRequest(request);
+        if (response == null) throw new ConnectorIOException("PUT " + url + " succeeded but returned no response body");
         String result = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
         closeResponse(response);
         return mapper.readValue(result, responseType);
@@ -431,29 +425,22 @@ public class EduIdConnector extends AbstractRestConnector<EduIdConfiguration> im
         try {
             LOG.info("executeQuery on {0}, query: {1}, options: {2}", objectClass, query, options);
             if (objectClass.is(AFFILIATION_OBJECT_CLASS)) {
-                //find by Uid (user Primary Key)
-                if (query != null && query.byUid != null) {
-                    LOG.info("executeQuery, searching affiliation by UID: {0}", query.byUid);
-                    EduIdScimAffiliation affiliation = get(scimUrl(AFFILIATIONS, query.byUid), EduIdScimAffiliation.class);
-                    LOG.info("executeQuery, affiliation found: {0}", affiliation);
-                    if (affiliation == null) {
-                        throw new UnknownUidException("Affiliation with ID " + query.byUid + " does not exist");
-                    }
-                    ConnectorObject connectorObject = affiliation.toConnectorObject();
-                    handler.handle(connectorObject);
-                } else if (query == null) {
-
+                if (query == null) {
                     JavaType listType = mapper.getTypeFactory()
                             .constructParametricType(ScimListResponse.class, EduIdScimAffiliation.class);
                     ScimListResponse<EduIdScimAffiliation> response = get(scimUrl(AFFILIATIONS), listType);
                     LOG.info("executeQuery, total affiliations found: {0}", response);
                     for (EduIdScimAffiliation affiliation : response.getResources()) {
-                        ConnectorObject connectorObject = affiliation.toConnectorObject();
-                        handler.handle(connectorObject);
+                        handler.handle(affiliation.toConnectorObject());
                     }
-
+                } else {
+                    LOG.info("executeQuery, searching affiliation by UID: {0}", query.byUid());
+                    EduIdScimAffiliation affiliation = get(scimUrl(AFFILIATIONS, query.byUid()), EduIdScimAffiliation.class);
+                    if (affiliation == null) {
+                        throw new UnknownUidException("Affiliation with ID " + query.byUid() + " does not exist");
+                    }
+                    handler.handle(affiliation.toConnectorObject());
                 }
-
             } else {
                 // not found
                 throw new UnsupportedOperationException("Unsupported object class " + objectClass);
